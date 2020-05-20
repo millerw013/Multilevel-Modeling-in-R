@@ -1,0 +1,706 @@
+setwd("C:/Users/William Miller/Desktop/MLM")
+
+PIRLs.reading.assesmsent.data <- read.delim("C:/Users/William Miller/MLM/PIRLs reading assesmsent data.txt")
+
+pirls <- PIRLs.reading.assesmsent.data
+
+rm(PIRLs.reading.assesmsent.data)
+
+#we need some packages.
+library(lme4)
+library(lmerTest)
+library(lattice)
+library(ggplot2)
+library(stringi)
+library(HLMdiag)
+library(texreg)
+library(optimx)
+
+#now that we have examined the data, let's see what
+#we are working with.
+
+variable.names(pirls)
+
+#let's see how many schools I'm working with
+table(pirls$schoolid)
+#based on this, I'm working with a ton of schools with vary different numbers of
+#students in each school. It's about 180.
+
+#I want a random subgroup of 25 of these schools. 
+groups <- unique(pirls$schoolid)[sample(1:180, 25)]
+subset <- pirls[pirls$schoolid%in%groups,]
+
+#to be clean, let's remove the groups variable. 
+rm(groups)
+
+#getting the descriptive statistics for each of the variables of interest. 
+table(pirls$female)
+table(pirls$bornUS)
+table(pirls$watchTV)
+table(pirls$econDisadv)
+table(pirls$enjoy)
+mean(pirls$reading)
+sd(pirls$reading)
+
+#let's create a variable for the mean reading and centered reading scores. 
+school.mean.reading <- as.data.frame(aggregate(reading~schoolid,
+                                       data = pirls,
+                                       "mean"))
+names(school.mean.reading) <- c('schoolid', 'school.mean.reading')
+pirls <- merge(pirls, school.mean.reading, by = 'schoolid')
+
+pirls$centered.reading <- pirls$reading - pirls$school.mean.reading
+
+#let's do this again, but this time we need to do it with reading enjoyment.
+school.mean.enjoyment <- as.data.frame(aggregate(enjoy~schoolid,
+                                               data = pirls,
+                                               "mean"))
+names(school.mean.enjoyment) <- c('schoolid', 'school.mean.enjoyment')
+pirls <- merge(pirls, school.mean.enjoyment, by = 'schoolid')
+rm(school.mean.enjoyment)
+pirls$centered.enjoy <- pirls$enjoy - pirls$school.mean.enjoyment
+***********************************************************************
+school.mean.reading1 <- as.data.frame(aggregate(reading~schoolid,
+                                               data = subset,
+                                               "mean"))
+names(school.mean.reading1) <- c('schoolid', 'school.mean.reading1')
+subset <- merge(subset, school.mean.reading1, by = 'schoolid')
+subset$centered.reading <- subset$reading - subset$school.mean.reading1
+rm(school.mean.reading)
+rm(school.mean.reading1)
+
+school.mean.enjoy <- as.data.frame(aggregate(enjoy~schoolid,
+                                               data = subset,
+                                               "mean"))
+names(school.mean.enjoy) <- c('schoolid', 'school.mean.enjoy')
+subset <- merge(subset, school.mean.enjoy, by = 'schoolid')
+rm(school.mean.enjoy)
+
+subset$centered.enjoy <- subset$enjoy - subset$school.mean.enjoy
+
+
+subset<- subset[-12]
+pirls <- pirls[-12]
+
+
+#let's work with our more numeric variables, first.  What is the relationship
+#between reading and watching TV? 
+xyplot(reading ~ watchTV | schoolid, data=subset, 
+       col.line=c('black','blue'), 
+       type=c('p','r'), 
+       main='Varability in reading and TV Relationship',
+       xlab="Hours Watching TV",
+       ylab="Reading Scores",
+       layout=c(5,5))	
+
+#now, let's look at the reading variables for each of the TV categories
+y <- aggregate(reading ~ watchTV, data = pirls, "mean")
+y
+
+plot(y[,1], y[,2],
+     type = 'b',
+     ylab = 'Mean Reading',
+     xlab = 'Hours Watching TV',
+     main = 'Marginal of Reading X HoursTV')
+#looks like it goes up and then goes down again.
+
+#now, let's do that for the enjoy variable.
+xyplot(reading ~ enjoy | schoolid, data=subset, 
+       col.line=c('black','blue'), 
+       type=c('p','r'), 
+       main='Varability in reading and Enjoying reading Relationship',
+       xlab="Reading Enjoyment",
+       ylab="Reading Scores",
+       layout=c(5,5))	
+
+#overall, it looks like there is a positive relationship between enjoyment
+#and reading scores.
+
+y <- aggregate(reading ~ enjoy, data = pirls, "mean")
+y
+
+plot(y[,1], y[,2],
+     type = 'b',
+     ylab = 'Mean Reading',
+     xlab = 'Enjoyment of Reading',
+     main = 'Marginal of Reading X Enjoyment')
+
+#let's check that for females VS Males
+y <- aggregate(reading ~ female, data = pirls, "mean")
+y
+
+plot(y[,1], y[,2],
+     type = 'b',
+     ylab = 'Mean Reading',
+     xlab = 'Gender',
+     main = 'Marginal of Reading X Gender')
+#it looks like females score higher on reading, but the difference is only around
+#eight points on the scale. 
+
+#let's check that for those who were not born in the U.S.
+y <- aggregate(reading ~ bornUS, data = pirls, "mean")
+y
+
+plot(y[,1], y[,2],
+     type = 'b',
+     ylab = 'Mean Reading',
+     xlab = 'bornUS',
+     main = 'Marginal of Reading X Nationality')
+
+#it looks like those born in the US are aroud 30 points higher in their
+#reading scores than those who were not. 
+
+#finally, let's look at economic disadvantage 
+
+y <- aggregate(reading ~ econDisadv, data = pirls, "mean")
+y
+
+plot(y[,1], y[,2],
+     type = 'b',
+     ylab = 'Mean Reading',
+     xlab = 'Economic Disadvantage',
+     main = 'Marginal of Reading X Economic')
+
+#it looks here like there is a difference by economic disadvantage.
+#we need the car package for that.
+library(car)
+pirls$econDisadv = recode(pirls$econDisadv,
+                          "'<10%' =1; '>50%' = 4;
+                          '11-25'=2; '26-50'=3")
+#checking the economic disadvantage vairable.
+
+table(pirls$econDisadv)
+
+
+
+#this will check if we have any interaction effects for gender and enjoyment
+subset$female <- as.factor(subset$female)
+reading.female <- aggregate(reading ~ enjoy + female, data=subset, FUN="mean")
+
+plot(reading.female$enjoy[1:4],reading.female$reading[1:4],type="l",
+     main="Mean Reading by Enjoyment",
+     xlab="Enjoyment of Reading",
+     ylab="Mean Reading Score",
+     col="blue")
+lines(reading.female$enjoy[5:8],reading.female$reading[5:8],type="l",col="red")
+legend("topleft",legend=c("male", "female"),
+       col=c("blue","red"), lty=1, cex=1.2)
+#linear lines for that. 
+subset$female <- as.factor(subset$female)
+reading.female <- aggregate(reading ~ enjoy + female, data=subset, FUN="mean")
+
+plot(reading.female$enjoy[1:4],reading.female$reading[1:4],type="n",
+     main="Mean Reading by Enjoyment",
+     xlab="Enjoyment of Reading",
+     ylab="Mean Reading Score",
+     col="blue")
+subw <- subset[which(subset$female==1),]
+abline(lm(reading~enjoy,data=subw),col="blue")
+subn <- subset[which(subset$female==0),]
+abline(lm(reading~enjoy,data=subn),col="red")
+legend("topleft",legend=c("male", "female"),
+       col=c("red","blue"), lty=1, cex=1.2)   
+
+#checking if we have any interactions between effects for gender watchTV
+#this will check if we have any interaction effects for gender and TV
+subset$female <- as.factor(subset$female)
+reading.female <- aggregate(reading ~ watchTV + female, data=subset, FUN="mean")
+
+plot(reading.female$watchTV[1:5],reading.female$reading[1:5],type="l",
+     main="Mean Reading by TV Hours",
+     xlab="Hours of TV",
+     ylab="Mean Reading Score",
+     col="blue")
+lines(reading.female$watchTV[6:10],reading.female$reading[6:10],type="l",col="red")
+legend("topleft",legend=c("male", "female"),
+       col=c("blue","red"), lty=1, cex=1.2)
+#it looks like there is an interaction between hours spent watching TV and
+#gender.
+#linear lines for that. 
+subset$female <- as.factor(subset$female)
+reading.female <- aggregate(reading ~ watchTV + female, data=subset, FUN="mean")
+
+plot(reading.female$watchTV[1:4],reading.female$reading[1:4],type="n",
+     main="Mean Reading by TV",
+     xlab="Hours Watching TV",
+     ylab="Mean Reading Score",
+     col="blue")
+subw <- subset[which(subset$female==1),]
+abline(lm(reading~watchTV,data=subw),col="blue")
+subn <- subset[which(subset$female==0),]
+abline(lm(reading~watchTV,data=subn),col="red")
+legend("bottomright",legend=c("male", "female"),
+       col=c("red","blue"), lty=1, cex=.75)  
+
+
+#checking if we have an interaction between born in the U.S. and enjoyment
+subset$bornUS <- as.factor(subset$bornUS)
+reading.bornUS <- aggregate(reading ~ enjoy + bornUS, data=subset, FUN="mean")
+
+plot(reading.bornUS$enjoy[1:4],reading.bornUS$reading[1:4],type="l",
+     main="Mean Reading by Enjoyment",
+     xlab="Enjoyment",
+     ylab="Mean Reading Score",
+     col="blue",
+     ylim = c(450, 600))
+lines(reading.bornUS$enjoy[5:8],reading.bornUS$reading[5:8],type="l",col="red")
+legend("topleft",legend=c("non-US", "Born in US"),
+       col=c("blue","red"), lty=1, cex=1.2)
+#it doesn't look like there is an interaction between nationality and enjoyment
+
+#check the linear version of that line
+
+subset$bornUS <- as.factor(subset$bornUS)
+reading.bornUS <- aggregate(reading ~ enjoy + bornUS, data=subset, FUN="mean")
+
+plot(reading.bornUS$enjoy[1:4],reading.bornUS$reading[1:4],type="n",
+     main="Mean Reading by Enjoyment",
+     xlab="Enjoyment",
+     ylab="Mean Reading Score",
+     col="blue", ylim = c(450, 540))
+subw <- subset[which(subset$bornUS==1),]
+abline(lm(reading~enjoy,data=subw),col="blue")
+subn <- subset[which(subset$bornUS==0),]
+abline(lm(reading~enjoy,data=subn),col="red")
+legend("bottomright",legend=c("non-US", "U.S. Born"),
+       col=c("red","blue"), lty=1, cex=.75)  
+
+
+
+
+
+
+#let's see the effect of watching TV and how it differs by nationality.
+subset$bornUS <- as.factor(subset$bornUS)
+reading.bornUS <- aggregate(reading ~ watchTV + bornUS, data=subset, FUN="mean")
+
+plot(reading.bornUS$watchTV[1:5],reading.bornUS$reading[1:5],type="l",
+     main="Mean Reading by Hours Watching TV",
+     xlab="Hours Watching TV",
+     ylab="Mean Reading Score",
+     col="blue",
+     ylim = c(450, 600))
+lines(reading.bornUS$watchTV[6:10],reading.bornUS$reading[6:10],type="l",col="red")
+legend("topleft",legend=c("non-US", "Born in US"),
+       col=c("blue","red"), lty=1, cex=0.75)
+#again, it doesn't look like there is an interaction there. 
+
+#let's check for linear 
+subset$bornUS <- as.factor(subset$bornUS)
+reading.bornUS <- aggregate(reading ~ watchTV + bornUS, data=subset, FUN="mean")
+
+plot(reading.bornUS$watchTV[1:4],reading.bornUS$reading[1:4],type="n",
+     main="Mean Reading by Hours Watching TV",
+     xlab="Hours Watching TV",
+     ylab="Mean Reading Score",
+     col="blue", ylim = c(450, 600))
+subw <- subset[which(subset$bornUS==1),]
+abline(lm(reading~watchTV,data=subw),col="blue")
+subn <- subset[which(subset$bornUS==0),]
+abline(lm(reading~watchTV,data=subn),col="red")
+legend("bottomright",legend=c("non-US", "U.S. Born"),
+       col=c("red","blue"), lty=1, cex=.75)  
+
+
+
+
+
+
+
+#let's try the interaction of economic disadvantage with nationality
+pirls$econDisadv<-as.numeric(pirls$econDisadv)
+pirls$bornUS <- as.factor(pirls$bornUS)
+reading.bornUS <- aggregate(reading ~ econDisadv + bornUS, data=pirls, FUN="mean")
+
+plot(reading.bornUS$econDisadv[1:4],reading.bornUS$reading[1:4],type="l",
+     main="Mean Reading by Economic Disadvantage",
+     xlab="Economic Disadvantage",
+     ylab="Mean Reading Score",
+     col="blue",
+     ylim = c(450, 600))
+lines(reading.bornUS$econDisadv[5:8],reading.bornUS$reading[5:8],type="l",col="red")
+legend("topright",legend=c("non-US", "Born in US"),
+       col=c("blue","red"), lty=1, cex=.5)
+
+#checking for linear
+pirls$bornUS <- as.factor(pirls$bornUS)
+reading.bornUS <- aggregate(reading ~ econDisadv + bornUS, data=pirls, FUN="mean")
+
+plot(reading.bornUS$econDisadv[1:4],reading.bornUS$reading[1:4],type="n",
+     main="Mean Reading by Economic Disadvanage",
+     xlab="Economic Disadvantage",
+     ylab="Mean Reading Score",
+     col="blue", ylim = c(450, 600))
+subw <- subset[which(subset$bornUS==1),]
+abline(lm(reading~watchTV,data=subw),col="blue")
+subn <- subset[which(pirlst$bornUS==0),]
+abline(lm(reading~watchTV,data=subn),col="red")
+legend("bottomright",legend=c("non-US", "U.S. Born"),
+       col=c("red","blue"), lty=1, cex=.75)  
+
+
+pirls$female <- as.factor(pirls$female)
+reading.female <- aggregate(reading ~ school.mean.enjoyment + female,
+                            data=pirls, FUN="mean")
+
+plot(reading.female$school.mean.enjoyment[1:4],reading.female$reading[1:4],type="n",
+     main="Mean Reading by School Mean Enjoyment",
+     xlab="School Mean Enjoyment",
+     ylab="Mean Reading Score",
+     col="blue", ylim = c(400, 600))
+subw <- pirls[which(pirls$female==1),]
+abline(lm(reading~school.mean.enjoyment,data=subw),col="blue")
+subn <- pirls[which(pirls$female==0),]
+abline(lm(reading~school.mean.enjoyment,data=subn),col="red")
+legend("bottomright",legend=c("male", "female"),
+       col=c("red","blue"), lty=1, cex=.75) 
+
+
+pirls$bornUS <- as.factor(pirls$bornUS)
+reading.bornUS <- aggregate(reading ~ school.mean.enjoyment + bornUS,
+                            data=pirls, FUN="mean")
+
+plot(reading.bornUS$school.mean.enjoyment[1:4],reading.bornUS$reading[1:4],type="n",
+     main="Mean Reading by School Mean Enjoyment",
+     xlab="School Mean Enjoyment",
+     ylab="Mean Reading Score",
+     col="blue", ylim = c(400, 600))
+subw <- pirls[which(pirls$bornUS==1),]
+abline(lm(reading~school.mean.enjoyment,data=subw),col="blue")
+subn <- pirls[which(pirls$bornUS==0),]
+abline(lm(reading~school.mean.enjoyment,data=subn),col="red")
+legend("bottomright",legend=c("Non-US", "US Born"),
+       col=c("red","blue"), lty=1, cex=.75) 
+
+
+###########################
+#let's get the packages that we need to do the regressions
+library(lme4)
+library(lmerTest)
+library(texreg)
+library(optimx)
+library(sandwich) 
+library(merDeriv)  
+library(lavaan)    
+##############################
+
+#after all of those checks, let's start the analyses.
+
+summary(model.null <- lmer(reading~ 1 + (1|schoolid), data = pirls, 
+                         REML = FALSE))
+summary(model.1 <- lmer (reading~1 + bornUS + 
+                                 female*enjoy + (1 + enjoy|schoolid), data = pirls,
+                         REML=FALSE))
+deviance(model.1)
+
+id <- pirls$schoolid
+hlmRsq(pirls,model.1)
+
+##the next step is to see whether or not we should have had a random slope.
+#that's done by running a model without the random slope and seeing what
+#happens without it.
+
+summary(model.2 <- lmer (reading~1 + bornUS + 
+                                 female*enjoy + (1|schoolid), data = pirls,
+                         REML=FALSE))
+
+anova(model.1, model.2)
+deviance(model.2)
+
+id <- pirls$schoolid
+hlmRsq(pirls,model.2)
+
+
+#since we only thought that one had a random slope,
+#it is time for us to start checking those fixed
+#effects that we put in the model.  Let's start with
+#the interaction between gender and enjoyment.
+
+summary(model.3 <- lmer (reading~1 + bornUS + 
+                                 female +
+                                 enjoy + (1 + enjoy|schoolid), data = pirls,
+                         REML=FALSE))
+deviance(model.3)
+anova(model.1, model.3)
+
+id <- pirls$schoolid
+hlmRsq(pirls,model.3)
+
+#Model 4 is going to remove gender.
+
+summary(model.4 <- lmer (reading~1 + bornUS + 
+                                 enjoy + (1 + enjoy|schoolid), data = pirls,
+                         REML=FALSE))
+deviance(model.4)
+
+anova(model.3, model.4)
+
+id <- pirls$schoolid
+hlmRsq(pirls,model.4)
+
+#alright.  So, since Model 3 seems to be the best we can do with the level 1 
+#fixed effects.  Now, it's time to go back and look at some other candidates 
+#for the random slope.  Let's start with the born in the U.S. variable. 
+
+rm(model.1)  #cleaning up R
+rm(model.2)  #cleaning up R
+rm(model.4)
+rm(model.null)   #cleaning up R
+
+summary(model.5 <- lmer (reading~1 + bornUS + 
+                                 female +
+                                 enjoy + (1 + bornUS +enjoy|schoolid), data = pirls,
+                         REML=FALSE))
+deviance(model.5)
+anova(model.3, model.5)
+
+id <- pirls$schoolid
+hlmRsq(pirls,model.5)
+
+#we only have one more variable to check: we should see what happens when we
+#have a random slope for the female variable.  
+
+summary(model.6 <- lmer (reading~1 + bornUS + 
+                                 female +
+                                 enjoy + (1 + female +enjoy|schoolid), data = pirls,
+                         REML=FALSE))
+deviance(model.6)
+anova(model.3, model.6)
+
+id <- pirls$schoolid
+hlmRsq(pirls,model.6)
+rm(model.5)
+
+#it looks like our final model for the step 1 process is going
+#to be model 6.  That means that we need to check the assumptions for
+#model 6.
+library(lme4)
+library(lmerTest)
+library(lattice)
+library(ggplot2)
+library(stringi)
+library(HLMdiag)
+library(texreg)
+library(optimx)
+
+
+cook<- cooks.distance(model.6, group = "schoolid")
+dotplot_diag(x=cook, cutoff="internal", 
+             name= "cooks.distance", 
+             ylab=("Cook's distance"), 
+             xlab=("School"))	
+
+mdfit <- mdffits(model.6, group= "schoolid")
+dotplot_diag(x=mdfit, cutoff="internal",
+             name = "mdffits",
+             ylab = ("MDFits"), 
+             xlab = ("School"))
+
+table(cook)
+cook[cook<1]
+
+#checking assumptions
+###
+plot(model.6, xlab = 'Fitted Conditional',
+     ylab = 'Pearson Residuals')
+
+#now, we're plotting the standardized residuals
+res1 <- HLMresid(model.6, level = 1,
+                 type = "EB", 
+                 standardize = TRUE)
+head(res1)
+
+dotplot(ranef(model.6, condVar=TRUE),
+        lattice.options=list(layout=c(1,2)))
+
+par(mfrow=c(2,2))
+
+res1 <- HLMresid(model.6, level = 1, type = "EB",
+                 standardize =  TRUE)
+fit <-fitted(model.6)
+
+plot(fit, res1, xlab = 'Conditional Fitted Values',
+     ylab = 'Pearson Std Residuals', 
+     main = 'Conditional Residuals')
+
+
+qqnorm(res1)
+abline(a = 0, b = 9, col = 'blue')
+
+# Graph 3: Historgram with overlay normal	
+h<- hist(res1,breaks=15,density=20) # draw historgram	
+xfit <- seq(-40, 40, length=50)  # sets range & number quantiles	
+yfit <- dnorm(xfit, mean=0, sd=7.177) # should be normal
+yfit <- yfit*diff(h$mids[1:2])*length(res1) # use mid-points 	
+lines(xfit, yfit, col='darkblue', lwd=2)  # draws normal	
+
+##############looks like we didn't quite meet the assumptions here
+
+
+#our next step is to work through the level 2 variables.
+#I thought that the disadvantage variable was going to be
+#significant, as well as the school mean enjoyment of reading.
+
+summary(model.7 <- lmer (reading~1 + bornUS + 
+                                 female*econDisadv +
+                                 enjoy + school.mean.enjoyment +
+                                 (1 + female +enjoy|schoolid), data = pirls,
+                         REML=FALSE))
+
+deviance(model.7)
+
+id <- pirls$schoolid
+hlmRsq(pirls,model.7)
+
+#it seems that school mean enjoyment and the 
+#interaction of female and school mean are not significant.
+#for that reason, model 8 will remove the interaction effect
+#first.
+
+summary(model.8 <- lmer (reading~1 + bornUS + 
+                                 female +econDisadv +
+                                 enjoy + school.mean.enjoyment +
+                                 (1 + female +enjoy|schoolid), data = pirls,
+                         REML=FALSE))
+
+deviance(model.8)
+anova(model.7, model.8)
+id <- pirls$schoolid
+hlmRsq(pirls,model.8)
+
+
+#getting rid of the interaction actually helped us out.  Let's remove the last
+#nonsignificant variable in the model: the school mean of enjoyment of reading.
+
+summary(model.9 <- lmer (reading~1 + bornUS + 
+                                 female +econDisadv +
+                                 enjoy +
+                                 (1 + female +enjoy|schoolid), data = pirls,
+                         REML=FALSE))
+
+deviance(model.9)
+anova(model.8, model.9)
+id <- pirls$schoolid
+hlmRsq(pirls,model.9)
+anova(model.8, model.9)
+
+rm(model.3)
+rm(model.6)
+rm(model.7)
+rm(model.8)
+rm(cook)
+rm(fit)
+rm(mdfit)
+rm(res1)
+rm(xfit)
+rm(yfit)
+
+#alright.  Our final model is model 9.  Let's finish up by checking
+#the assumptions one more time. 
+
+
+
+
+
+##############################################################################
+#creating the hlmrsq function is everything below here.  
+hlmRsq <- function(dataset,model1) {
+        
+        X <- model.matrix(model1)                          # Extract design matrix for fixed effects
+        n <- nrow(X)                                       # total sample size
+        varcov <- as.data.frame(VarCorr(model1))[4]        # extract variance covariance of Random effects as vector
+        q <- -.5 + sqrt(1/4 + 2*(nrow(varcov)-1))          # number of random effects (solution to quadratic eq)
+        ncov <- q*(q-1)/2                                  # number of covariances 
+        justcov <- varcov[(q+1):(q+ncov),]                 # vector of just the covariances
+        nclusters <- length(unique(id))                    # number of clusters
+        
+        T <- if(q==1) { 
+                Z <- X[,1]
+                zbar <- mean(Z)
+                T <- varcov[1,1]
+        } else{ 
+                Z <- X[, 1:q]
+                zbar <- colMeans(Z)
+                T <- diag(varcov[1:q,])                       
+                T1 <- matrix(,(q), (q))
+                T1[lower.tri(T1, diag=FALSE)] <- justcov
+                T2 <- t(T1)
+                T2[lower.tri(T2, diag=FALSE)] <- justcov
+                T2 <- as.data.frame(T2)
+                T2[is.na(T2)] <- 0
+                T <- T + T2
+        }
+        T <- as.matrix(T)                            # Known at Psi in my glmm book
+        
+        # Set up for loop
+        
+        nj <- table(id)                              # number level 1 units per cluster
+        csum <- cumsum(table(id))                    # cumulative frequencies
+        cut2 <- csum                                 # end index
+        cut1 <- c(0, csum) + 1                       # start index
+        cut1 <- cut1[1:(nclusters)]
+        
+        nj <- table(id)                              # number level 1 units
+        Sw <- matrix(0, nrow=q, ncol=q)              # initial Sum of Square between
+        Sb <- matrix(0, nrow=q, ncol=q)              # initial sum of squares within
+        
+        # loop throught to get Sb and Sw
+        
+        for (i in 1:nclusters){         
+                # This is for getting model based covariance matrix              
+                Zj <- X[cut1[i]:cut2[i],1:q]        # extract columns of X for random design for group j
+                Zj <- as.matrix(Zj)
+                onej <- matrix(1, nrow=1, ncol=nj[i])
+                zbarj <- (t(onej %*% Zj)/nj[i])
+                zbar  <- matrix(zbar, nrow=q, ncol=1)
+                Sb <- Sb + nj[i] * (zbarj - zbar) %*% t(zbarj - zbar) 
+                
+                zbarj <- t(matrix(zbarj, nrow= q, ncol=nj[i]))
+                Sw <- Sw +  t(Zj - zbarj) %*% (Zj - zbarj)
+        }
+        Sb <- Sb/(n-1)
+        Sw <- Sw/(n-1)
+        
+        sigma2 <- varcov[(q+ncov+1),]                # put within variance estimated into sigma2
+        
+        #
+        # Fit the null model using same estimation method at model input
+        #
+        
+        # Determines whether ML or REML was used to fit the model
+        
+        sum <- summary(model1)
+        if (sum[1]=="Linear mixed model fit by maximum likelihood "){
+                method="FALSE"
+        } else {
+                method='TRUE'
+        }
+        
+        # Fits the null model by updating formula from model input to functon
+        
+        f <- formula(model1)
+        all <- all.vars(f)
+        null <- update(f, .~ 1 -all + (1 | id))
+        model0 <- lmer(null, data=dataset, REML=method)
+        varcov0 <- as.data.frame(VarCorr(model0))[4] 
+        
+        ####################################################################
+        #  R1sq    & R2sq                                                  #
+        ####################################################################
+        
+        numerator1 <- t(zbar) %*% T %*% zbar + sum(diag( (T %*% (Sb + Sw)) )) + sigma2
+        denominator1 <- sum(varcov0)
+        R1sq <- 1 -numerator1/denominator1
+        
+        harmonic.mean <- nclusters/sum(1/nj)
+        
+        numerator2 <- t(zbar) %*% T %*% zbar + sum(diag((T %*% (Sb + Sw/harmonic.mean)))) + sigma2/harmonic.mean
+        denominator2 <- sum(varcov0[1,1]) + varcov0[2,1]/harmonic.mean
+        
+        R2sq <- 1 - numerator2/denominator2
+        
+        Rsq.values <- cbind(harmonic.mean, R1sq,R2sq)
+        colnames(Rsq.values) <- c('harmonic.mean', 'R1sq', 'R2sq')
+        return(Rsq.values)
+}
+##########################################################################
